@@ -904,7 +904,7 @@ class CLanguage(Language):
                 return_error = ('return NULL;' if default_return_converter
                                 else 'goto exit;')
                 parser_code = [normalize_snippet("""
-                    if (nargs) {{
+                    if (nargs || (kwnames && PyTuple_GET_SIZE(kwnames))) {{
                         PyErr_SetString(PyExc_TypeError, "{name}() takes no arguments");
                         %s
                     }}
@@ -1968,7 +1968,7 @@ extensions['py'] = PythonLanguage
 
 def write_file(filename: str, new_contents: str) -> None:
     try:
-        with open(filename, 'r', encoding="utf-8") as fp:
+        with open(filename, encoding="utf-8") as fp:
             old_contents = fp.read()
 
         if old_contents == new_contents:

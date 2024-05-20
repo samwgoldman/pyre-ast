@@ -14,8 +14,8 @@ know about when using Python on Microsoft Windows.
 
 Unlike most Unix systems and services, Windows does not include a system
 supported installation of Python. To make Python available, the CPython team
-has compiled Windows installers (MSI packages) with every `release
-<https://www.python.org/download/releases/>`_ for many years. These installers
+has compiled Windows installers with every `release
+<https://www.python.org/downloads/>`_ for many years. These installers
 are primarily intended to add a per-user installation of Python, with the
 core interpreter and library being used by a single user. The installer is also
 able to install for all users of a single machine, and a separate ZIP file is
@@ -1187,21 +1187,22 @@ Otherwise, your users may experience problems using your application. Note that
 the first suggestion is the best, as the others may still be susceptible to
 non-standard paths in the registry and user site-packages.
 
-.. versionchanged::
-   3.6
+.. versionchanged:: 3.6
 
-      * Adds ``._pth`` file support and removes ``applocal`` option from
-        ``pyvenv.cfg``.
-      * Adds :file:`python{XX}.zip` as a potential landmark when directly adjacent
-        to the executable.
+   Add ``._pth`` file support and removes ``applocal`` option from
+   ``pyvenv.cfg``.
 
-.. deprecated::
-   3.6
+.. versionchanged:: 3.6
 
-      Modules specified in the registry under ``Modules`` (not ``PythonPath``)
-      may be imported by :class:`importlib.machinery.WindowsRegistryFinder`.
-      This finder is enabled on Windows in 3.6.0 and earlier, but may need to
-      be explicitly added to :data:`sys.meta_path` in the future.
+   Add :file:`python{XX}.zip` as a potential landmark when directly adjacent
+   to the executable.
+
+.. deprecated:: 3.6
+
+   Modules specified in the registry under ``Modules`` (not ``PythonPath``)
+   may be imported by :class:`importlib.machinery.WindowsRegistryFinder`.
+   This finder is enabled on Windows in 3.6.0 and earlier, but may need to
+   be explicitly added to :data:`sys.meta_path` in the future.
 
 Additional modules
 ==================

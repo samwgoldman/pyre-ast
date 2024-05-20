@@ -666,6 +666,23 @@ class TracebackErrorLocationCaretTestBase:
         result_lines = self.get_exception(f_with_binary_operator)
         self.assertEqual(result_lines, expected_error.splitlines())
 
+    def test_caret_for_failed_assertion(self):
+        def f_assert():
+            test = 3
+            assert test == 1 and test == 2, "Bug found?"
+
+        lineno_f = f_assert.__code__.co_firstlineno
+        expected_error = (
+            'Traceback (most recent call last):\n'
+            f'  File "{__file__}", line {self.callable_line}, in get_exception\n'
+            '    callable()\n'
+            f'  File "{__file__}", line {lineno_f+2}, in f_assert\n'
+            '    assert test == 1 and test == 2, "Bug found?"\n'
+            '           ^^^^^^^^^^^^^^^^^^^^^^^\n'
+        )
+        result_lines = self.get_exception(f_assert)
+        self.assertEqual(result_lines, expected_error.splitlines())
+
     def test_traceback_specialization_with_syntax_error(self):
         bytecode = compile("1 / 0 / 1 / 2\n", TESTFN, "exec")
 
@@ -922,8 +939,63 @@ class TracebackErrorLocationCaretTestBase:
             f"  File \"{__file__}\", line {self.callable_line}, in get_exception",
             "    callable()",
             f"  File \"{__file__}\", line {f.__code__.co_firstlineno + 4}, in f",
-            "    print(1, ｗｗｗ(",
-            "             ^^^^",
+            f"    print(1, ｗｗｗ(",
+            f"             ^^^^^^^",
+        ]
+        self.assertEqual(actual, expected)
+
+    def test_byte_offset_with_wide_characters_term_highlight(self):
+        def f():
+            说明说明 = 1
+            şçöğıĤellö = 0 # not wide but still non-ascii
+            return 说明说明 / şçöğıĤellö
+
+        actual = self.get_exception(f)
+        expected = [
+            f"Traceback (most recent call last):",
+            f"  File \"{__file__}\", line {self.callable_line}, in get_exception",
+            f"    callable()",
+            f"  File \"{__file__}\", line {f.__code__.co_firstlineno + 3}, in f",
+            f"    return 说明说明 / şçöğıĤellö",
+            f"           ~~~~~~~~~^~~~~~~~~~~~",
+        ]
+        self.assertEqual(actual, expected)
+
+    def test_byte_offset_with_emojis_term_highlight(self):
+        def f():
+            return "✨🐍" + func_说明说明("📗🚛",
+                "📗🚛") + "🐍"
+
+        actual = self.get_exception(f)
+        expected = [
+            f"Traceback (most recent call last):",
+            f"  File \"{__file__}\", line {self.callable_line}, in get_exception",
+            f"    callable()",
+            f"  File \"{__file__}\", line {f.__code__.co_firstlineno + 1}, in f",
+            f'    return "✨🐍" + func_说明说明("📗🚛",',
+            f"                    ^^^^^^^^^^^^^",
+        ]
+        self.assertEqual(actual, expected)
+
+    def test_byte_offset_wide_chars_subscript(self):
+        def f():
+            my_dct = {
+                "✨🚛✨": {
+                    "说明": {
+                        "🐍🐍🐍": None
+                    }
+                }
+            }
+            return my_dct["✨🚛✨"]["说明"]["🐍"]["说明"]["🐍🐍"]
+
+        actual = self.get_exception(f)
+        expected = [
+            f"Traceback (most recent call last):",
+            f"  File \"{__file__}\", line {self.callable_line}, in get_exception",
+            f"    callable()",
+            f"  File \"{__file__}\", line {f.__code__.co_firstlineno + 8}, in f",
+            f'    return my_dct["✨🚛✨"]["说明"]["🐍"]["说明"]["🐍🐍"]',
+            f"           ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^",
         ]
         self.assertEqual(actual, expected)
 
@@ -1599,27 +1671,43 @@ class BaseExceptionReportingTests:
         err_msg = "b'please do not show me as numbers'"
         self.assertEqual(self.get_report(e), vanilla + err_msg + '\n')
 
-    def test_exception_with_note_with_multiple_notes(self):
-        e = ValueError(42)
+        # an exception with a broken __getattr__ raising a non expected error
+        class BrokenException(Exception):
+            broken = False
+            def __getattr__(self, name):
+                if self.broken:
+                    raise ValueError(f'no {name}')
+                raise AttributeError(name)
+
+        e = BrokenException(123)
         vanilla = self.get_report(e)
-
-        e.add_note('Note 1')
-        e.add_note('Note 2')
-        e.add_note('Note 3')
-
+        e.broken = True
         self.assertEqual(
             self.get_report(e),
-            vanilla + 'Note 1\n' + 'Note 2\n' + 'Note 3\n')
+            vanilla + "Ignored error getting __notes__: ValueError('no __notes__')\n")
 
-        del e.__notes__
-        e.add_note('Note 4')
-        del e.__notes__
-        e.add_note('Note 5')
-        e.add_note('Note 6')
+    def test_exception_with_multiple_notes(self):
+        for e in [ValueError(42), SyntaxError('bad syntax')]:
+            with self.subTest(e=e):
+                vanilla = self.get_report(e)
 
-        self.assertEqual(
-            self.get_report(e),
-            vanilla + 'Note 5\n' + 'Note 6\n')
+                e.add_note('Note 1')
+                e.add_note('Note 2')
+                e.add_note('Note 3')
+
+                self.assertEqual(
+                    self.get_report(e),
+                    vanilla + 'Note 1\n' + 'Note 2\n' + 'Note 3\n')
+
+                del e.__notes__
+                e.add_note('Note 4')
+                del e.__notes__
+                e.add_note('Note 5')
+                e.add_note('Note 6')
+
+                self.assertEqual(
+                    self.get_report(e),
+                    vanilla + 'Note 5\n' + 'Note 6\n')
 
     def test_exception_qualname(self):
         class A:

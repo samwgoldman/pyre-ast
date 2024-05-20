@@ -150,9 +150,8 @@ ste_new(struct symtable *st, identifier name, _Py_block_ty block,
 static PyObject *
 ste_repr(PySTEntryObject *ste)
 {
-    return PyUnicode_FromFormat("<symtable entry %U(%ld), line %d>",
-                                ste->ste_name,
-                                PyLong_AS_LONG(ste->ste_id), ste->ste_lineno);
+    return PyUnicode_FromFormat("<symtable entry %U(%R), line %d>",
+                                ste->ste_name, ste->ste_id, ste->ste_lineno);
 }
 
 static void
@@ -282,11 +281,6 @@ symtable_new(void)
     return NULL;
 }
 
-/* Using a scaling factor means this should automatically adjust when
-   the recursion limit is adjusted for small or large C stack allocations.
-*/
-#define COMPILER_STACK_FRAME_SCALE 2
-
 struct symtable *
 _PySymtable_Build(mod_ty mod, PyObject *filename, PyFutureFeatures *future)
 {
@@ -313,9 +307,9 @@ _PySymtable_Build(mod_ty mod, PyObject *filename, PyFutureFeatures *future)
     }
     /* Be careful here to prevent overflow. */
     int recursion_depth = C_RECURSION_LIMIT - tstate->c_recursion_remaining;
-    starting_recursion_depth = recursion_depth * COMPILER_STACK_FRAME_SCALE;
+    starting_recursion_depth = recursion_depth;
     st->recursion_depth = starting_recursion_depth;
-    st->recursion_limit = C_RECURSION_LIMIT * COMPILER_STACK_FRAME_SCALE;
+    st->recursion_limit = C_RECURSION_LIMIT;
 
     /* Make the initial symbol information gathering pass */
     if (!symtable_enter_block(st, &_Py_ID(top), ModuleBlock, (void *)mod, 0, 0, 0, 0)) {
@@ -523,6 +517,7 @@ analyze_name(PySTEntryObject *ste, PyObject *scopes, PyObject *name, long flags,
              PyObject *bound, PyObject *local, PyObject *free,
              PyObject *global, PyObject *type_params, PySTEntryObject *class_entry)
 {
+    int contains;
     if (flags & DEF_GLOBAL) {
         if (flags & DEF_NONLOCAL) {
             PyErr_Format(PyExc_SyntaxError,
@@ -543,14 +538,22 @@ analyze_name(PySTEntryObject *ste, PyObject *scopes, PyObject *name, long flags,
                          "nonlocal declaration not allowed at module level");
             return error_at_directive(ste, name);
         }
-        if (!PySet_Contains(bound, name)) {
+        contains = PySet_Contains(bound, name);
+        if (contains < 0) {
+            return 0;
+        }
+        if (!contains) {
             PyErr_Format(PyExc_SyntaxError,
                          "no binding for nonlocal '%U' found",
                          name);
 
             return error_at_directive(ste, name);
         }
-        if (PySet_Contains(type_params, name)) {
+        contains = PySet_Contains(type_params, name);
+        if (contains < 0) {
+            return 0;
+        }
+        if (contains) {
             PyErr_Format(PyExc_SyntaxError,
                          "nonlocal binding not allowed for type parameter '%U'",
                          name);
@@ -599,17 +602,29 @@ analyze_name(PySTEntryObject *ste, PyObject *scopes, PyObject *name, long flags,
        Note that having a non-NULL bound implies that the block
        is nested.
     */
-    if (bound && PySet_Contains(bound, name)) {
-        SET_SCOPE(scopes, name, FREE);
-        ste->ste_free = 1;
-        return PySet_Add(free, name) >= 0;
+    if (bound) {
+        contains = PySet_Contains(bound, name);
+        if (contains < 0) {
+            return 0;
+        }
+        if (contains) {
+            SET_SCOPE(scopes, name, FREE);
+            ste->ste_free = 1;
+            return PySet_Add(free, name) >= 0;
+        }
     }
     /* If a parent has a global statement, then call it global
        explicit?  It could also be global implicit.
      */
-    if (global && PySet_Contains(global, name)) {
-        SET_SCOPE(scopes, name, GLOBAL_IMPLICIT);
-        return 1;
+    if (global) {
+        contains = PySet_Contains(global, name);
+        if (contains < 0) {
+            return 0;
+        }
+        if (contains) {
+            SET_SCOPE(scopes, name, GLOBAL_IMPLICIT);
+            return 1;
+        }
     }
     if (ste->ste_nested)
         ste->ste_free = 1;
@@ -638,6 +653,8 @@ inline_comprehension(PySTEntryObject *ste, PySTEntryObject *comp,
 {
     PyObject *k, *v;
     Py_ssize_t pos = 0;
+    int remove_dunder_class = 0;
+
     while (PyDict_Next(comp->ste_symbols, &pos, &k, &v)) {
         // skip comprehension parameter
         long comp_flags = PyLong_AS_LONG(v);
@@ -659,6 +676,19 @@ inline_comprehension(PySTEntryObject *ste, PySTEntryObject *comp,
         if (!existing) {
             // name does not exist in scope, copy from comprehension
             assert(scope != FREE || PySet_Contains(comp_free, k) == 1);
+            if (scope == FREE && ste->ste_type == ClassBlock &&
+                _PyUnicode_EqualToASCIIString(k, "__class__")) {
+                // if __class__ is unbound in the enclosing class scope and free
+                // in the comprehension scope, it needs special handling; just
+                // letting it be marked as free in class scope will break due to
+                // drop_class_free
+                scope = GLOBAL_IMPLICIT;
+                only_flags &= ~DEF_FREE;
+                if (PySet_Discard(comp_free, k) < 0) {
+                    return 0;
+                }
+                remove_dunder_class = 1;
+            }
             PyObject *v_flags = PyLong_FromLong(only_flags);
             if (v_flags == NULL) {
                 return 0;
@@ -682,6 +712,10 @@ inline_comprehension(PySTEntryObject *ste, PySTEntryObject *comp,
                 }
             }
         }
+    }
+    comp->ste_free = PySet_Size(comp_free) > 0;
+    if (remove_dunder_class && PyDict_DelItemString(comp->ste_symbols, "__class__") < 0) {
+        return 0;
     }
     return 1;
 }
@@ -712,8 +746,19 @@ analyze_cells(PyObject *scopes, PyObject *free, PyObject *inlined_cells)
         scope = PyLong_AS_LONG(v);
         if (scope != LOCAL)
             continue;
-        if (!PySet_Contains(free, name) && !PySet_Contains(inlined_cells, name))
-            continue;
+        int contains = PySet_Contains(free, name);
+        if (contains < 0) {
+            goto error;
+        }
+        if (!contains) {
+            contains = PySet_Contains(inlined_cells, name);
+            if (contains < 0) {
+                goto error;
+            }
+            if (!contains) {
+                continue;
+            }
+        }
         /* Replace LOCAL with CELL for this name, and remove
            from free. It is safe to replace the value of name
            in the dict, because it will not cause a resize.
@@ -764,7 +809,11 @@ update_symbols(PyObject *symbols, PyObject *scopes,
         long scope, flags;
         assert(PyLong_Check(v));
         flags = PyLong_AS_LONG(v);
-        if (PySet_Contains(inlined_cells, name)) {
+        int contains = PySet_Contains(inlined_cells, name);
+        if (contains < 0) {
+            return 0;
+        }
+        if (contains) {
             flags |= DEF_COMP_CELL;
         }
         v_scope = PyDict_GetItemWithError(scopes, name);
@@ -821,9 +870,15 @@ update_symbols(PyObject *symbols, PyObject *scopes,
             goto error;
         }
         /* Handle global symbol */
-        if (bound && !PySet_Contains(bound, name)) {
-            Py_DECREF(name);
-            continue;       /* it's a global */
+        if (bound) {
+            int contains = PySet_Contains(bound, name);
+            if (contains < 0) {
+                goto error;
+            }
+            if (!contains) {
+                Py_DECREF(name);
+                continue;       /* it's a global */
+            }
         }
         /* Propagate new free symbol up the lexical stack */
         if (PyDict_SetItem(symbols, name, v_free) < 0) {
@@ -831,6 +886,12 @@ update_symbols(PyObject *symbols, PyObject *scopes,
         }
         Py_DECREF(name);
     }
+
+    /* Check if loop ended because of exception in PyIter_Next */
+    if (PyErr_Occurred()) {
+        goto error;
+    }
+
     Py_DECREF(itr);
     Py_DECREF(v_free);
     return 1;
@@ -1193,14 +1254,20 @@ symtable_enter_block(struct symtable *st, identifier name, _Py_block_ty block,
 }
 
 static long
-symtable_lookup(struct symtable *st, PyObject *name)
+symtable_lookup_entry(struct symtable *st, PySTEntryObject *ste, PyObject *name)
 {
     PyObject *mangled = _Py_Mangle(st->st_private, name);
     if (!mangled)
         return 0;
-    long ret = _PyST_GetSymbol(st->st_cur, mangled);
+    long ret = _PyST_GetSymbol(ste, mangled);
     Py_DECREF(mangled);
     return ret;
+}
+
+static long
+symtable_lookup(struct symtable *st, PyObject *name)
+{
+    return symtable_lookup_entry(st, st->st_cur, name);
 }
 
 static int
@@ -1843,7 +1910,7 @@ symtable_extend_namedexpr_scope(struct symtable *st, expr_ty e)
          * binding conflict with iteration variables, otherwise skip it
          */
         if (ste->ste_comprehension) {
-            long target_in_scope = _PyST_GetSymbol(ste, target_name);
+            long target_in_scope = symtable_lookup_entry(st, ste, target_name);
             if ((target_in_scope & DEF_COMP_ITER) &&
                 (target_in_scope & DEF_LOCAL)) {
                 PyErr_Format(PyExc_SyntaxError, NAMED_EXPR_COMP_CONFLICT, target_name);
@@ -1859,7 +1926,7 @@ symtable_extend_namedexpr_scope(struct symtable *st, expr_ty e)
 
         /* If we find a FunctionBlock entry, add as GLOBAL/LOCAL or NONLOCAL/LOCAL */
         if (ste->ste_type == FunctionBlock) {
-            long target_in_scope = _PyST_GetSymbol(ste, target_name);
+            long target_in_scope = symtable_lookup_entry(st, ste, target_name);
             if (target_in_scope & DEF_GLOBAL) {
                 if (!symtable_add_def(st, target_name, DEF_GLOBAL, LOCATION(e)))
                     VISIT_QUIT(st, 0);

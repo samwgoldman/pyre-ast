@@ -18,12 +18,8 @@ _PyPegen_interactive_exit(Parser *p)
 }
 
 Py_ssize_t
-_PyPegen_byte_offset_to_character_offset(PyObject *line, Py_ssize_t col_offset)
+_PyPegen_byte_offset_to_character_offset_raw(const char* str, Py_ssize_t col_offset)
 {
-    const char *str = PyUnicode_AsUTF8(line);
-    if (!str) {
-        return -1;
-    }
     Py_ssize_t len = strlen(str);
     if (col_offset > len + 1) {
         col_offset = len + 1;
@@ -36,6 +32,71 @@ _PyPegen_byte_offset_to_character_offset(PyObject *line, Py_ssize_t col_offset)
     Py_ssize_t size = PyUnicode_GET_LENGTH(text);
     Py_DECREF(text);
     return size;
+}
+
+// Calculate the extra amount of width space the given source
+// code segment might take if it were to be displayed on a fixed
+// width output device. Supports wide unicode characters and emojis.
+Py_ssize_t
+_PyPegen_calculate_display_width(PyObject *line, Py_ssize_t character_offset)
+{
+    PyObject *segment = PyUnicode_Substring(line, 0, character_offset);
+    if (!segment) {
+        return -1;
+    }
+
+    // Fast track for ascii strings
+    if (PyUnicode_IS_ASCII(segment)) {
+        Py_DECREF(segment);
+        return character_offset;
+    }
+
+    PyObject *width_fn = _PyImport_GetModuleAttrString("unicodedata", "east_asian_width");
+    if (!width_fn) {
+        return -1;
+    }
+
+    Py_ssize_t width = 0;
+    Py_ssize_t len = PyUnicode_GET_LENGTH(segment);
+    for (Py_ssize_t i = 0; i < len; i++) {
+        PyObject *chr = PyUnicode_Substring(segment, i, i + 1);
+        if (!chr) {
+            Py_DECREF(segment);
+            Py_DECREF(width_fn);
+            return -1;
+        }
+
+        PyObject *width_specifier = PyObject_CallOneArg(width_fn, chr);
+        Py_DECREF(chr);
+        if (!width_specifier) {
+            Py_DECREF(segment);
+            Py_DECREF(width_fn);
+            return -1;
+        }
+
+        if (_PyUnicode_EqualToASCIIString(width_specifier, "W") ||
+            _PyUnicode_EqualToASCIIString(width_specifier, "F")) {
+            width += 2;
+        }
+        else {
+            width += 1;
+        }
+        Py_DECREF(width_specifier);
+    }
+
+    Py_DECREF(segment);
+    Py_DECREF(width_fn);
+    return width;
+}
+
+Py_ssize_t
+_PyPegen_byte_offset_to_character_offset(PyObject *line, Py_ssize_t col_offset)
+{
+    const char *str = PyUnicode_AsUTF8(line);
+    if (!str) {
+        return -1;
+    }
+    return _PyPegen_byte_offset_to_character_offset_raw(str, col_offset);
 }
 
 // Here, mark is the start of the node, while p->mark is the end.

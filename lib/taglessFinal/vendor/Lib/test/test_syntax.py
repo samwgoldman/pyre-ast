@@ -1004,7 +1004,22 @@ Missing ':' before suites:
    Traceback (most recent call last):
    SyntaxError: expected ':'
 
+   >>> def f[T]()
+   ...     pass
+   Traceback (most recent call last):
+   SyntaxError: expected ':'
+
    >>> class A
+   ...     pass
+   Traceback (most recent call last):
+   SyntaxError: expected ':'
+
+   >>> class A[T]
+   ...     pass
+   Traceback (most recent call last):
+   SyntaxError: expected ':'
+
+   >>> class A[T]()
    ...     pass
    Traceback (most recent call last):
    SyntaxError: expected ':'
@@ -1446,7 +1461,17 @@ Specialized indentation errors:
    Traceback (most recent call last):
    IndentationError: expected an indented block after function definition on line 1
 
+   >>> def foo[T](x, /, y, *, z=2):
+   ... pass
+   Traceback (most recent call last):
+   IndentationError: expected an indented block after function definition on line 1
+
    >>> class Blech(A):
+   ... pass
+   Traceback (most recent call last):
+   IndentationError: expected an indented block after class definition on line 1
+
+   >>> class Blech[T](A):
    ... pass
    Traceback (most recent call last):
    IndentationError: expected an indented block after class definition on line 1
@@ -1791,22 +1816,22 @@ A[*(1:2)]
     >>> A[*(1:2)]
     Traceback (most recent call last):
         ...
-    SyntaxError: invalid syntax
+    SyntaxError: Invalid star expression
     >>> A[*(1:2)] = 1
     Traceback (most recent call last):
         ...
-    SyntaxError: invalid syntax
+    SyntaxError: Invalid star expression
     >>> del A[*(1:2)]
     Traceback (most recent call last):
         ...
-    SyntaxError: invalid syntax
+    SyntaxError: Invalid star expression
 
 A[*:] and A[:*]
 
     >>> A[*:]
     Traceback (most recent call last):
         ...
-    SyntaxError: invalid syntax
+    SyntaxError: Invalid star expression
     >>> A[:*]
     Traceback (most recent call last):
         ...
@@ -1817,7 +1842,7 @@ A[*]
     >>> A[*]
     Traceback (most recent call last):
         ...
-    SyntaxError: invalid syntax
+    SyntaxError: Invalid star expression
 
 A[**]
 
@@ -1955,10 +1980,34 @@ Invalid expressions in type scopes:
       ...
    SyntaxError: yield expression cannot be used within the definition of a generic
 
+    >>> f(**x, *y)
+    Traceback (most recent call last):
+    SyntaxError: iterable argument unpacking follows keyword argument unpacking
+
+    >>> f(**x, *)
+    Traceback (most recent call last):
+    SyntaxError: Invalid star expression
+
+    >>> f(x, *:)
+    Traceback (most recent call last):
+    SyntaxError: Invalid star expression
+
+    >>> f(x, *)
+    Traceback (most recent call last):
+    SyntaxError: Invalid star expression
+
+    >>> f(x = 5, *)
+    Traceback (most recent call last):
+    SyntaxError: Invalid star expression
+
+    >>> f(x = 5, *:)
+    Traceback (most recent call last):
+    SyntaxError: Invalid star expression
 """
 
 import re
 import doctest
+import textwrap
 import unittest
 
 from test import support
@@ -2205,6 +2254,31 @@ if x:
         code += f"{' '*4*12}pass"
         self._check_error(code, "too many statically nested blocks")
 
+    @support.cpython_only
+    def test_with_statement_many_context_managers(self):
+        # See gh-113297
+
+        def get_code(n):
+            code = textwrap.dedent("""
+                def bug():
+                    with (
+                    a
+                """)
+            for i in range(n):
+                code += f"    as a{i}, a\n"
+            code += "): yield a"
+            return code
+
+        CO_MAXBLOCKS = 20  # static nesting limit of the compiler
+
+        for n in range(CO_MAXBLOCKS):
+            with self.subTest(f"within range: {n=}"):
+                compile(get_code(n), "<string>", "exec")
+
+        for n in range(CO_MAXBLOCKS, CO_MAXBLOCKS + 5):
+            with self.subTest(f"out of range: {n=}"):
+                self._check_error(get_code(n), "too many statically nested blocks")
+
     def test_barry_as_flufl_with_syntax_errors(self):
         # The "barry_as_flufl" rule can produce some "bugs-at-a-distance" if
         # is reading the wrong token in the presence of syntax errors later
@@ -2260,6 +2334,12 @@ func(
 """
         self._check_error(code, "parenthesis '\\)' does not match opening parenthesis '\\['")
 
+        self._check_error("match y:\n case e(e=v,v,", " was never closed")
+
+        # Examples with dencodings
+        s = b'# coding=latin\n(aaaaaaaaaaaaaaaaa\naaaaaaaaaaa\xb5'
+        self._check_error(s, r"'\(' was never closed")
+
     def test_error_string_literal(self):
 
         self._check_error("'blech", "unterminated string literal")
@@ -2269,6 +2349,7 @@ func(
 
     def test_invisible_characters(self):
         self._check_error('print\x17("Hello")', "invalid non-printable character")
+        self._check_error(b"with(0,,):\n\x01", "invalid non-printable character")
 
     def test_match_call_does_not_raise_syntax_error(self):
         code = """

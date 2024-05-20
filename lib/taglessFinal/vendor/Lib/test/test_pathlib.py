@@ -546,6 +546,7 @@ class _BasePurePathTest(object):
         self.assertRaises(ValueError, P('.').with_name, 'd.xml')
         self.assertRaises(ValueError, P('/').with_name, 'd.xml')
         self.assertRaises(ValueError, P('a/b').with_name, '')
+        self.assertRaises(ValueError, P('a/b').with_name, '.')
         self.assertRaises(ValueError, P('a/b').with_name, '/c')
         self.assertRaises(ValueError, P('a/b').with_name, 'c/')
         self.assertRaises(ValueError, P('a/b').with_name, 'c/d')
@@ -563,6 +564,7 @@ class _BasePurePathTest(object):
         self.assertRaises(ValueError, P('.').with_stem, 'd')
         self.assertRaises(ValueError, P('/').with_stem, 'd')
         self.assertRaises(ValueError, P('a/b').with_stem, '')
+        self.assertRaises(ValueError, P('a/b').with_stem, '.')
         self.assertRaises(ValueError, P('a/b').with_stem, '/c')
         self.assertRaises(ValueError, P('a/b').with_stem, 'c/')
         self.assertRaises(ValueError, P('a/b').with_stem, 'c/d')
@@ -1167,8 +1169,10 @@ class PureWindowsPathTest(_BasePurePathTest, unittest.TestCase):
         self.assertRaises(ValueError, P('c:').with_name, 'd.xml')
         self.assertRaises(ValueError, P('c:/').with_name, 'd.xml')
         self.assertRaises(ValueError, P('//My/Share').with_name, 'd.xml')
-        self.assertRaises(ValueError, P('c:a/b').with_name, 'd:')
-        self.assertRaises(ValueError, P('c:a/b').with_name, 'd:e')
+        self.assertEqual(str(P('a').with_name('d:')), '.\\d:')
+        self.assertEqual(str(P('a').with_name('d:e')), '.\\d:e')
+        self.assertEqual(P('c:a/b').with_name('d:'), P('c:a/d:'))
+        self.assertEqual(P('c:a/b').with_name('d:e'), P('c:a/d:e'))
         self.assertRaises(ValueError, P('c:a/b').with_name, 'd:/e')
         self.assertRaises(ValueError, P('c:a/b').with_name, '//My/Share')
 
@@ -1181,8 +1185,10 @@ class PureWindowsPathTest(_BasePurePathTest, unittest.TestCase):
         self.assertRaises(ValueError, P('c:').with_stem, 'd')
         self.assertRaises(ValueError, P('c:/').with_stem, 'd')
         self.assertRaises(ValueError, P('//My/Share').with_stem, 'd')
-        self.assertRaises(ValueError, P('c:a/b').with_stem, 'd:')
-        self.assertRaises(ValueError, P('c:a/b').with_stem, 'd:e')
+        self.assertEqual(str(P('a').with_stem('d:')), '.\\d:')
+        self.assertEqual(str(P('a').with_stem('d:e')), '.\\d:e')
+        self.assertEqual(P('c:a/b').with_stem('d:'), P('c:a/d:'))
+        self.assertEqual(P('c:a/b').with_stem('d:e'), P('c:a/d:e'))
         self.assertRaises(ValueError, P('c:a/b').with_stem, 'd:/e')
         self.assertRaises(ValueError, P('c:a/b').with_stem, '//My/Share')
 
@@ -2628,15 +2634,15 @@ class _BasePathTest(object):
         self.assertIs((P / 'fileA\x00').is_char_device(), False)
 
     def test_is_char_device_true(self):
-        # Under Unix, /dev/null should generally be a char device.
-        P = self.cls('/dev/null')
+        # os.devnull should generally be a char device.
+        P = self.cls(os.devnull)
         if not P.exists():
-            self.skipTest("/dev/null required")
+            self.skipTest("null device required")
         self.assertTrue(P.is_char_device())
         self.assertFalse(P.is_block_device())
         self.assertFalse(P.is_file())
-        self.assertIs(self.cls('/dev/null\udfff').is_char_device(), False)
-        self.assertIs(self.cls('/dev/null\x00').is_char_device(), False)
+        self.assertIs(self.cls(f'{os.devnull}\udfff').is_char_device(), False)
+        self.assertIs(self.cls(f'{os.devnull}\x00').is_char_device(), False)
 
     def test_pickling_common(self):
         p = self.cls(BASE, 'fileA')

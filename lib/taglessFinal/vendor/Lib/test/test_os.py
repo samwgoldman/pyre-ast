@@ -1142,9 +1142,12 @@ class EnvironTests(mapping_tests.BasicTestMappingProtocol):
     def test_putenv_unsetenv_error(self):
         # Empty variable name is invalid.
         # "=" and null character are not allowed in a variable name.
-        for name in ('', '=name', 'na=me', 'name=', 'name\0', 'na\0me'):
+        for name in ('', '=name', 'na=me', 'name='):
             self.assertRaises((OSError, ValueError), os.putenv, name, "value")
             self.assertRaises((OSError, ValueError), os.unsetenv, name)
+        for name in ('name\0', 'na\0me'):
+            self.assertRaises(ValueError, os.putenv, name, "value")
+            self.assertRaises(ValueError, os.unsetenv, name)
 
         if sys.platform == "win32":
             # On Windows, an environment variable string ("name=value" string)
@@ -1287,6 +1290,7 @@ class EnvironTests(mapping_tests.BasicTestMappingProtocol):
 
 class WalkTests(unittest.TestCase):
     """Tests for os.walk()."""
+    is_fwalk = False
 
     # Wrapper to hide minor differences between os.walk and os.fwalk
     # to tests both functions with the same code base
@@ -1321,14 +1325,14 @@ class WalkTests(unittest.TestCase):
         self.sub11_path = join(self.sub1_path, "SUB11")
         sub2_path = join(self.walk_path, "SUB2")
         sub21_path = join(sub2_path, "SUB21")
-        tmp1_path = join(self.walk_path, "tmp1")
+        self.tmp1_path = join(self.walk_path, "tmp1")
         tmp2_path = join(self.sub1_path, "tmp2")
         tmp3_path = join(sub2_path, "tmp3")
         tmp5_path = join(sub21_path, "tmp3")
         self.link_path = join(sub2_path, "link")
         t2_path = join(os_helper.TESTFN, "TEST2")
         tmp4_path = join(os_helper.TESTFN, "TEST2", "tmp4")
-        broken_link_path = join(sub2_path, "broken_link")
+        self.broken_link_path = join(sub2_path, "broken_link")
         broken_link2_path = join(sub2_path, "broken_link2")
         broken_link3_path = join(sub2_path, "broken_link3")
 
@@ -1338,13 +1342,13 @@ class WalkTests(unittest.TestCase):
         os.makedirs(sub21_path)
         os.makedirs(t2_path)
 
-        for path in tmp1_path, tmp2_path, tmp3_path, tmp4_path, tmp5_path:
+        for path in self.tmp1_path, tmp2_path, tmp3_path, tmp4_path, tmp5_path:
             with open(path, "x", encoding='utf-8') as f:
                 f.write("I'm " + path + " and proud of it.  Blame test_os.\n")
 
         if os_helper.can_symlink():
             os.symlink(os.path.abspath(t2_path), self.link_path)
-            os.symlink('broken', broken_link_path, True)
+            os.symlink('broken', self.broken_link_path, True)
             os.symlink(join('tmp3', 'broken'), broken_link2_path, True)
             os.symlink(join('SUB21', 'tmp5'), broken_link3_path, True)
             self.sub2_tree = (sub2_path, ["SUB21", "link"],
@@ -1440,6 +1444,11 @@ class WalkTests(unittest.TestCase):
         else:
             self.fail("Didn't follow symlink with followlinks=True")
 
+        walk_it = self.walk(self.broken_link_path, follow_symlinks=True)
+        if self.is_fwalk:
+            self.assertRaises(FileNotFoundError, next, walk_it)
+        self.assertRaises(StopIteration, next, walk_it)
+
     def test_walk_bad_dir(self):
         # Walk top-down.
         errors = []
@@ -1460,6 +1469,73 @@ class WalkTests(unittest.TestCase):
                     self.assertIn(os.path.join(root, dir2), roots)
         finally:
             os.rename(path1new, path1)
+
+    def test_walk_bad_dir2(self):
+        walk_it = self.walk('nonexisting')
+        if self.is_fwalk:
+            self.assertRaises(FileNotFoundError, next, walk_it)
+        self.assertRaises(StopIteration, next, walk_it)
+
+        walk_it = self.walk('nonexisting', follow_symlinks=True)
+        if self.is_fwalk:
+            self.assertRaises(FileNotFoundError, next, walk_it)
+        self.assertRaises(StopIteration, next, walk_it)
+
+        walk_it = self.walk(self.tmp1_path)
+        self.assertRaises(StopIteration, next, walk_it)
+
+        walk_it = self.walk(self.tmp1_path, follow_symlinks=True)
+        if self.is_fwalk:
+            self.assertRaises(NotADirectoryError, next, walk_it)
+        self.assertRaises(StopIteration, next, walk_it)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), 'requires os.mkfifo()')
+    @unittest.skipIf(sys.platform == "vxworks",
+                    "fifo requires special path on VxWorks")
+    def test_walk_named_pipe(self):
+        path = os_helper.TESTFN + '-pipe'
+        os.mkfifo(path)
+        self.addCleanup(os.unlink, path)
+
+        walk_it = self.walk(path)
+        self.assertRaises(StopIteration, next, walk_it)
+
+        walk_it = self.walk(path, follow_symlinks=True)
+        if self.is_fwalk:
+            self.assertRaises(NotADirectoryError, next, walk_it)
+        self.assertRaises(StopIteration, next, walk_it)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), 'requires os.mkfifo()')
+    @unittest.skipIf(sys.platform == "vxworks",
+                    "fifo requires special path on VxWorks")
+    def test_walk_named_pipe2(self):
+        path = os_helper.TESTFN + '-dir'
+        os.mkdir(path)
+        self.addCleanup(shutil.rmtree, path)
+        os.mkfifo(os.path.join(path, 'mypipe'))
+
+        errors = []
+        walk_it = self.walk(path, onerror=errors.append)
+        next(walk_it)
+        self.assertRaises(StopIteration, next, walk_it)
+        self.assertEqual(errors, [])
+
+        errors = []
+        walk_it = self.walk(path, onerror=errors.append)
+        root, dirs, files = next(walk_it)
+        self.assertEqual(root, path)
+        self.assertEqual(dirs, [])
+        self.assertEqual(files, ['mypipe'])
+        dirs.extend(files)
+        files.clear()
+        if self.is_fwalk:
+            self.assertRaises(NotADirectoryError, next, walk_it)
+        self.assertRaises(StopIteration, next, walk_it)
+        if self.is_fwalk:
+            self.assertEqual(errors, [])
+        else:
+            self.assertEqual(len(errors), 1, errors)
+            self.assertIsInstance(errors[0], NotADirectoryError)
 
     def test_walk_many_open_files(self):
         depth = 30
@@ -1526,6 +1602,7 @@ class WalkTests(unittest.TestCase):
 @unittest.skipUnless(hasattr(os, 'fwalk'), "Test needs os.fwalk()")
 class FwalkTests(WalkTests):
     """Tests for os.fwalk()."""
+    is_fwalk = True
 
     def walk(self, top, **kwargs):
         for root, dirs, files, root_fd in self.fwalk(top, **kwargs):
@@ -1732,7 +1809,7 @@ class MakedirTests(unittest.TestCase):
         os.removedirs(path)
 
 
-@os_helper.skip_unless_working_chmod
+@unittest.skipUnless(hasattr(os, "chown"), "requires os.chown()")
 class ChownFileTests(unittest.TestCase):
 
     @classmethod
@@ -2559,30 +2636,34 @@ class Win32KillTests(unittest.TestCase):
         tagname = "test_os_%s" % uuid.uuid1()
         m = mmap.mmap(-1, 1, tagname)
         m[0] = 0
+
         # Run a script which has console control handling enabled.
-        proc = subprocess.Popen([sys.executable,
-                   os.path.join(os.path.dirname(__file__),
-                                "win_console_handler.py"), tagname],
-                   creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
-        # Let the interpreter startup before we send signals. See #3137.
-        count, max = 0, 100
-        while count < max and proc.poll() is None:
-            if m[0] == 1:
-                break
-            time.sleep(0.1)
-            count += 1
-        else:
-            # Forcefully kill the process if we weren't able to signal it.
-            os.kill(proc.pid, signal.SIGINT)
-            self.fail("Subprocess didn't finish initialization")
-        os.kill(proc.pid, event)
-        # proc.send_signal(event) could also be done here.
-        # Allow time for the signal to be passed and the process to exit.
-        time.sleep(0.5)
-        if not proc.poll():
-            # Forcefully kill the process if we weren't able to signal it.
-            os.kill(proc.pid, signal.SIGINT)
-            self.fail("subprocess did not stop on {}".format(name))
+        script = os.path.join(os.path.dirname(__file__),
+                              "win_console_handler.py")
+        cmd = [sys.executable, script, tagname]
+        proc = subprocess.Popen(cmd,
+                                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+
+        with proc:
+            # Let the interpreter startup before we send signals. See #3137.
+            for _ in support.sleeping_retry(support.SHORT_TIMEOUT):
+                if proc.poll() is None:
+                    break
+            else:
+                # Forcefully kill the process if we weren't able to signal it.
+                proc.kill()
+                self.fail("Subprocess didn't finish initialization")
+
+            os.kill(proc.pid, event)
+
+            try:
+                # proc.send_signal(event) could also be done here.
+                # Allow time for the signal to be passed and the process to exit.
+                proc.wait(timeout=support.SHORT_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                # Forcefully kill the process if we weren't able to signal it.
+                proc.kill()
+                self.fail("subprocess did not stop on {}".format(name))
 
     @unittest.skip("subprocesses aren't inheriting Ctrl+C property")
     @support.requires_subprocess()
@@ -3070,6 +3151,65 @@ class Win32NtTests(unittest.TestCase):
             except subprocess.TimeoutExpired:
                 proc.terminate()
 
+    @support.requires_subprocess()
+    def test_stat_inaccessible_file(self):
+        filename = os_helper.TESTFN
+        ICACLS = os.path.expandvars(r"%SystemRoot%\System32\icacls.exe")
+
+        with open(filename, "wb") as f:
+            f.write(b'Test data')
+
+        stat1 = os.stat(filename)
+
+        try:
+            # Remove all permissions from the file
+            subprocess.check_output([ICACLS, filename, "/inheritance:r"],
+                                    stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as ex:
+            if support.verbose:
+                print(ICACLS, filename, "/inheritance:r", "failed.")
+                print(ex.stdout.decode("oem", "replace").rstrip())
+            try:
+                os.unlink(filename)
+            except OSError:
+                pass
+            self.skipTest("Unable to create inaccessible file")
+
+        def cleanup():
+            # Give delete permission. We are the file owner, so we can do this
+            # even though we removed all permissions earlier.
+            subprocess.check_output([ICACLS, filename, "/grant", "Everyone:(D)"],
+                                    stderr=subprocess.STDOUT)
+            os.unlink(filename)
+
+        self.addCleanup(cleanup)
+
+        if support.verbose:
+            print("File:", filename)
+            print("stat with access:", stat1)
+
+        # First test - we shouldn't raise here, because we still have access to
+        # the directory and can extract enough information from its metadata.
+        stat2 = os.stat(filename)
+
+        if support.verbose:
+            print(" without access:", stat2)
+
+        # We may not get st_dev/st_ino, so ensure those are 0 or match
+        self.assertIn(stat2.st_dev, (0, stat1.st_dev))
+        self.assertIn(stat2.st_ino, (0, stat1.st_ino))
+
+        # st_mode and st_size should match (for a normal file, at least)
+        self.assertEqual(stat1.st_mode, stat2.st_mode)
+        self.assertEqual(stat1.st_size, stat2.st_size)
+
+        # st_ctime and st_mtime should be the same
+        self.assertEqual(stat1.st_ctime, stat2.st_ctime)
+        self.assertEqual(stat1.st_mtime, stat2.st_mtime)
+
+        # st_atime should be the same or later
+        self.assertGreaterEqual(stat1.st_atime, stat2.st_atime)
+
 
 @os_helper.skip_unless_symlink
 class NonLocalSymlinkTests(unittest.TestCase):
@@ -3418,22 +3558,22 @@ class ProgramPriorityTests(unittest.TestCase):
     """Tests for os.getpriority() and os.setpriority()."""
 
     def test_set_get_priority(self):
-
         base = os.getpriority(os.PRIO_PROCESS, os.getpid())
-        os.setpriority(os.PRIO_PROCESS, os.getpid(), base + 1)
-        try:
-            new_prio = os.getpriority(os.PRIO_PROCESS, os.getpid())
-            if base >= 19 and new_prio <= 19:
-                raise unittest.SkipTest("unable to reliably test setpriority "
-                                        "at current nice level of %s" % base)
-            else:
-                self.assertEqual(new_prio, base + 1)
-        finally:
-            try:
-                os.setpriority(os.PRIO_PROCESS, os.getpid(), base)
-            except OSError as err:
-                if err.errno != errno.EACCES:
-                    raise
+        code = f"""if 1:
+        import os
+        os.setpriority(os.PRIO_PROCESS, os.getpid(), {base} + 1)
+        print(os.getpriority(os.PRIO_PROCESS, os.getpid()))
+        """
+
+        # Subprocess inherits the current process' priority.
+        _, out, _ = assert_python_ok("-c", code)
+        new_prio = int(out)
+        # nice value cap is 19 for linux and 20 for FreeBSD
+        if base >= 19 and new_prio <= base:
+            raise unittest.SkipTest("unable to reliably test setpriority "
+                                    "at current nice level of %s" % base)
+        else:
+            self.assertEqual(new_prio, base + 1)
 
 
 @unittest.skipUnless(hasattr(os, 'sendfile'), "test needs os.sendfile()")
@@ -4700,20 +4840,21 @@ class ForkTests(unittest.TestCase):
         self.assertEqual(err.decode("utf-8"), "")
         self.assertEqual(out.decode("utf-8"), "")
 
-    def test_fork_at_exit(self):
+    def test_fork_at_finalization(self):
         code = """if 1:
             import atexit
             import os
 
-            def exit_handler():
-                pid = os.fork()
-                if pid != 0:
-                    print("shouldn't be printed")
-
-            atexit.register(exit_handler)
+            class AtFinalization:
+                def __del__(self):
+                    print("OK")
+                    pid = os.fork()
+                    if pid != 0:
+                        print("shouldn't be printed")
+            at_finalization = AtFinalization()
         """
         _, out, err = assert_python_ok("-c", code)
-        self.assertEqual(b"", out)
+        self.assertEqual(b"OK\n", out)
         self.assertIn(b"can't fork at interpreter shutdown", err)
 
 

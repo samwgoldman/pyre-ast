@@ -649,6 +649,30 @@ class CosmeticTestCase(ASTTestCase):
         self.check_ast_roundtrip("""f'''""\"''\\'{"\\n\\"'"}''' """)
         self.check_ast_roundtrip("""f'''""\"''\\'{""\"\\n\\"'''""\" '''\\n'''}''' """)
 
+    def test_backslash_in_format_spec(self):
+        import re
+        msg = re.escape("invalid escape sequence '\\ '")
+        with self.assertWarnsRegex(SyntaxWarning, msg):
+            self.check_ast_roundtrip("""f"{x:\\ }" """)
+        self.check_ast_roundtrip("""f"{x:\\n}" """)
+
+        self.check_ast_roundtrip("""f"{x:\\\\ }" """)
+
+        with self.assertWarnsRegex(SyntaxWarning, msg):
+            self.check_ast_roundtrip("""f"{x:\\\\\\ }" """)
+        self.check_ast_roundtrip("""f"{x:\\\\\\n}" """)
+
+        self.check_ast_roundtrip("""f"{x:\\\\\\\\ }" """)
+
+    def test_quote_in_format_spec(self):
+        self.check_ast_roundtrip("""f"{x:'}" """)
+        self.check_ast_roundtrip("""f"{x:\\'}" """)
+        self.check_ast_roundtrip("""f"{x:\\\\'}" """)
+
+        self.check_ast_roundtrip("""f'\\'{x:"}' """)
+        self.check_ast_roundtrip("""f'\\'{x:\\"}' """)
+        self.check_ast_roundtrip("""f'\\'{x:\\\\"}' """)
+
 
 class ManualASTCreationTestCase(unittest.TestCase):
     """Test that AST nodes created without a type_params field unparse correctly."""
@@ -730,7 +754,8 @@ class DirectoryTestCase(ASTTestCase):
     test_directories = (lib_dir, lib_dir / "test")
     run_always_files = {"test_grammar.py", "test_syntax.py", "test_compile.py",
                         "test_ast.py", "test_asdl_parser.py", "test_fstring.py",
-                        "test_patma.py", "test_type_alias.py", "test_type_params.py"}
+                        "test_patma.py", "test_type_alias.py", "test_type_params.py",
+                        "test_tokenize.py"}
 
     _files_to_test = None
 

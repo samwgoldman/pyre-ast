@@ -59,7 +59,7 @@ all consecutive arguments will end up in :data:`sys.argv` -- note that the first
 element, subscript zero (``sys.argv[0]``), is a string reflecting the program's
 source.
 
-.. cmdoption:: -c <command>
+.. option:: -c <command>
 
    Execute the Python code in *command*.  *command* can be one or more
    statements separated by newlines, with significant leading whitespace as in
@@ -72,7 +72,7 @@ source.
 
    .. audit-event:: cpython.run_command command cmdoption-c
 
-.. cmdoption:: -m <module-name>
+.. option:: -m <module-name>
 
    Search :data:`sys.path` for the named module and execute its contents as
    the :mod:`__main__` module.
@@ -103,7 +103,7 @@ source.
 
    :option:`-I` option can  be used to run the script in isolated mode where
    :data:`sys.path` contains neither the current directory nor the user's
-   site-packages directory. All :envvar:`PYTHON*` environment variables are
+   site-packages directory. All ``PYTHON*`` environment variables are
    ignored, too.
 
    Many standard library modules contain code that is invoked on their execution
@@ -161,7 +161,7 @@ source.
 
    :option:`-I` option can  be used to run the script in isolated mode where
    :data:`sys.path` contains neither the script's directory nor the user's
-   site-packages directory. All :envvar:`PYTHON*` environment variables are
+   site-packages directory. All ``PYTHON*`` environment variables are
    ignored, too.
 
    .. audit-event:: cpython.run_file filename
@@ -188,35 +188,35 @@ automatically enabled, if available on your platform (see
 Generic options
 ~~~~~~~~~~~~~~~
 
-.. cmdoption:: -?
-               -h
-               --help
+.. option:: -?
+            -h
+            --help
 
    Print a short description of all command line options and corresponding
    environment variables and exit.
 
-.. cmdoption:: --help-env
+.. option:: --help-env
 
    Print a short description of Python-specific environment variables
    and exit.
 
    .. versionadded:: 3.11
 
-.. cmdoption:: --help-xoptions
+.. option:: --help-xoptions
 
    Print a description of implementation-specific :option:`-X` options
    and exit.
 
    .. versionadded:: 3.11
 
-.. cmdoption:: --help-all
+.. option:: --help-all
 
    Print complete usage information and exit.
 
    .. versionadded:: 3.11
 
-.. cmdoption:: -V
-               --version
+.. option:: -V
+            --version
 
    Print the Python version number and exit.  Example output could be:
 
@@ -240,22 +240,23 @@ Generic options
 Miscellaneous options
 ~~~~~~~~~~~~~~~~~~~~~
 
-.. cmdoption:: -b
+.. option:: -b
 
-   Issue a warning when comparing :class:`bytes` or :class:`bytearray` with
-   :class:`str` or :class:`bytes` with :class:`int`.  Issue an error when the
-   option is given twice (:option:`!-bb`).
+   Issue a warning when converting :class:`bytes` or :class:`bytearray` to
+   :class:`str` without specifying encoding or comparing :class:`!bytes` or
+   :class:`!bytearray` with :class:`!str` or :class:`!bytes` with :class:`int`.
+   Issue an error when the option is given twice (:option:`!-bb`).
 
    .. versionchanged:: 3.5
-      Affects comparisons of :class:`bytes` with :class:`int`.
+      Affects also comparisons of :class:`bytes` with :class:`int`.
 
-.. cmdoption:: -B
+.. option:: -B
 
    If given, Python won't try to write ``.pyc`` files on the
    import of source modules.  See also :envvar:`PYTHONDONTWRITEBYTECODE`.
 
 
-.. cmdoption:: --check-hash-based-pycs default|always|never
+.. option:: --check-hash-based-pycs default|always|never
 
    Control the validation behavior of hash-based ``.pyc`` files. See
    :ref:`pyc-invalidation`. When set to ``default``, checked and unchecked
@@ -269,7 +270,7 @@ Miscellaneous options
    option.
 
 
-.. cmdoption:: -d
+.. option:: -d
 
    Turn on parser debugging output (for expert only).
    See also the :envvar:`PYTHONDEBUG` environment variable.
@@ -278,15 +279,15 @@ Miscellaneous options
    it's ignored.
 
 
-.. cmdoption:: -E
+.. option:: -E
 
-   Ignore all :envvar:`PYTHON*` environment variables, e.g.
+   Ignore all ``PYTHON*`` environment variables, e.g.
    :envvar:`PYTHONPATH` and :envvar:`PYTHONHOME`, that might be set.
 
    See also the :option:`-P` and :option:`-I` (isolated) options.
 
 
-.. cmdoption:: -i
+.. option:: -i
 
    When a script is passed as first argument or the :option:`-c` option is used,
    enter interactive mode after executing the script or the command, even when
@@ -297,20 +298,20 @@ Miscellaneous options
    raises an exception.  See also :envvar:`PYTHONINSPECT`.
 
 
-.. cmdoption:: -I
+.. option:: -I
 
    Run Python in isolated mode. This also implies :option:`-E`, :option:`-P`
    and :option:`-s` options.
 
    In isolated mode :data:`sys.path` contains neither the script's directory nor
-   the user's site-packages directory. All :envvar:`PYTHON*` environment
+   the user's site-packages directory. All ``PYTHON*`` environment
    variables are ignored, too. Further restrictions may be imposed to prevent
    the user from injecting malicious code.
 
    .. versionadded:: 3.4
 
 
-.. cmdoption:: -O
+.. option:: -O
 
    Remove assert statements and any code conditional on the value of
    :const:`__debug__`.  Augment the filename for compiled
@@ -321,7 +322,7 @@ Miscellaneous options
       Modify ``.pyc`` filenames according to :pep:`488`.
 
 
-.. cmdoption:: -OO
+.. option:: -OO
 
    Do :option:`-O` and also discard docstrings.  Augment the filename
    for compiled (:term:`bytecode`) files by adding ``.opt-2`` before the
@@ -331,7 +332,7 @@ Miscellaneous options
       Modify ``.pyc`` filenames according to :pep:`488`.
 
 
-.. cmdoption:: -P
+.. option:: -P
 
    Don't prepend a potentially unsafe path to :data:`sys.path`:
 
@@ -348,50 +349,52 @@ Miscellaneous options
    .. versionadded:: 3.11
 
 
-.. cmdoption:: -q
+.. option:: -q
 
    Don't display the copyright and version messages even in interactive mode.
 
    .. versionadded:: 3.2
 
 
-.. cmdoption:: -R
+.. option:: -R
 
    Turn on hash randomization. This option only has an effect if the
    :envvar:`PYTHONHASHSEED` environment variable is set to ``0``, since hash
    randomization is enabled by default.
 
    On previous versions of Python, this option turns on hash randomization,
-   so that the :meth:`__hash__` values of str and bytes objects
+   so that the :meth:`~object.__hash__` values of str and bytes objects
    are "salted" with an unpredictable random value.  Although they remain
    constant within an individual Python process, they are not predictable
    between repeated invocations of Python.
 
    Hash randomization is intended to provide protection against a
    denial-of-service caused by carefully chosen inputs that exploit the worst
-   case performance of a dict construction, O(n\ :sup:`2`) complexity.  See
+   case performance of a dict construction, *O*\ (*n*\ :sup:`2`) complexity.  See
    http://ocert.org/advisories/ocert-2011-003.html for details.
 
    :envvar:`PYTHONHASHSEED` allows you to set a fixed value for the hash
    seed secret.
 
+   .. versionadded:: 3.2.3
+
    .. versionchanged:: 3.7
       The option is no longer ignored.
 
-   .. versionadded:: 3.2.3
 
-
-.. cmdoption:: -s
+.. option:: -s
 
    Don't add the :data:`user site-packages directory <site.USER_SITE>` to
    :data:`sys.path`.
+
+   See also :envvar:`PYTHONNOUSERSITE`.
 
    .. seealso::
 
       :pep:`370` -- Per user site-packages directory
 
 
-.. cmdoption:: -S
+.. option:: -S
 
    Disable the import of the module :mod:`site` and the site-dependent
    manipulations of :data:`sys.path` that it entails.  Also disable these
@@ -399,7 +402,7 @@ Miscellaneous options
    :func:`site.main` if you want them to be triggered).
 
 
-.. cmdoption:: -u
+.. option:: -u
 
    Force the stdout and stderr streams to be unbuffered.  This option has no
    effect on the stdin stream.
@@ -410,7 +413,7 @@ Miscellaneous options
       The text layer of the stdout and stderr streams now is unbuffered.
 
 
-.. cmdoption:: -v
+.. option:: -v
 
    Print a message each time a module is initialized, showing the place
    (filename or built-in module) from which it is loaded.  When given twice
@@ -425,7 +428,7 @@ Miscellaneous options
 
 
 .. _using-on-warnings:
-.. cmdoption:: -W arg
+.. option:: -W arg
 
    Warning control. Python's warning machinery by default prints warning
    messages to :data:`sys.stderr`.
@@ -484,13 +487,13 @@ Miscellaneous options
    details.
 
 
-.. cmdoption:: -x
+.. option:: -x
 
    Skip the first line of the source, allowing use of non-Unix forms of
    ``#!cmd``.  This is intended for a DOS specific hack only.
 
 
-.. cmdoption:: -X
+.. option:: -X
 
    Reserved for various implementation-specific options.  CPython currently
    defines the following possible values:
@@ -517,7 +520,7 @@ Miscellaneous options
      asyncio'``.  See also :envvar:`PYTHONPROFILEIMPORTTIME`.
    * ``-X dev``: enable :ref:`Python Development Mode <devmode>`, introducing
      additional runtime checks that are too expensive to be enabled by
-     default.
+     default.  See also :envvar:`PYTHONDEVMODE`.
    * ``-X utf8`` enables the :ref:`Python UTF-8 Mode <utf8-mode>`.
      ``-X utf8=0`` explicitly disables :ref:`Python UTF-8 Mode <utf8-mode>`
      (even when it would otherwise activate automatically).
@@ -550,23 +553,22 @@ Miscellaneous options
    It also allows passing arbitrary values and retrieving them through the
    :data:`sys._xoptions` dictionary.
 
-   .. versionchanged:: 3.2
-      The :option:`-X` option was added.
+   .. versionadded:: 3.2
 
-   .. versionadded:: 3.3
-      The ``-X faulthandler`` option.
+   .. versionchanged:: 3.3
+      Added the ``-X faulthandler`` option.
 
-   .. versionadded:: 3.4
-      The ``-X showrefcount`` and ``-X tracemalloc`` options.
+   .. versionchanged:: 3.4
+      Added the ``-X showrefcount`` and ``-X tracemalloc`` options.
 
-   .. versionadded:: 3.6
-      The ``-X showalloccount`` option.
+   .. versionchanged:: 3.6
+      Added the ``-X showalloccount`` option.
 
-   .. versionadded:: 3.7
-      The ``-X importtime``, ``-X dev`` and ``-X utf8`` options.
+   .. versionchanged:: 3.7
+      Added the ``-X importtime``, ``-X dev`` and ``-X utf8`` options.
 
-   .. versionadded:: 3.8
-      The ``-X pycache_prefix`` option. The ``-X dev`` option now logs
+   .. versionchanged:: 3.8
+      Added the ``-X pycache_prefix`` option. The ``-X dev`` option now logs
       ``close()`` exceptions in :class:`io.IOBase` destructor.
 
    .. versionchanged:: 3.9
@@ -575,29 +577,22 @@ Miscellaneous options
 
       The ``-X showalloccount`` option has been removed.
 
-   .. versionadded:: 3.10
-      The ``-X warn_default_encoding`` option.
+   .. versionchanged:: 3.10
+      Added the ``-X warn_default_encoding`` option.
+      Removed the ``-X oldparser`` option.
 
-   .. deprecated-removed:: 3.9 3.10
-      The ``-X oldparser`` option.
+   .. versionchanged:: 3.11
+      Added the ``-X no_debug_ranges``, ``-X frozen_modules`` and
+      ``-X int_max_str_digits`` options.
 
-   .. versionadded:: 3.11
-      The ``-X no_debug_ranges`` option.
-
-   .. versionadded:: 3.11
-      The ``-X frozen_modules`` option.
-
-   .. versionadded:: 3.11
-      The ``-X int_max_str_digits`` option.
-
-   .. versionadded:: 3.12
-      The ``-X perf`` option.
+   .. versionchanged:: 3.12
+      Added the ``-X perf`` option.
 
 
 Options you shouldn't use
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. cmdoption:: -J
+.. option:: -J
 
    Reserved for use by Jython_.
 
@@ -851,9 +846,10 @@ conflict.
 
    If this environment variable is set to a non-empty string,
    :func:`faulthandler.enable` is called at startup: install a handler for
-   :const:`SIGSEGV`, :const:`SIGFPE`, :const:`SIGABRT`, :const:`SIGBUS` and
-   :const:`SIGILL` signals to dump the Python traceback.  This is equivalent to
-   :option:`-X` ``faulthandler`` option.
+   :const:`~signal.SIGSEGV`, :const:`~signal.SIGFPE`,
+   :const:`~signal.SIGABRT`, :const:`~signal.SIGBUS` and
+   :const:`~signal.SIGILL` signals to dump the Python traceback.
+   This is equivalent to :option:`-X` ``faulthandler`` option.
 
    .. versionadded:: 3.3
 
@@ -910,10 +906,10 @@ conflict.
    * ``malloc_debug``: same as ``malloc`` but also install debug hooks.
    * ``pymalloc_debug``: same as ``pymalloc`` but also install debug hooks.
 
+   .. versionadded:: 3.6
+
    .. versionchanged:: 3.7
       Added the ``"default"`` allocator.
-
-   .. versionadded:: 3.6
 
 
 .. envvar:: PYTHONMALLOCSTATS

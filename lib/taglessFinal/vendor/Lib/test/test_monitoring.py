@@ -1168,7 +1168,7 @@ class TestLineAndInstructionEvents(CheckEvents):
             ('instruction', 'func1', 14),
             ('line', 'get_events', 11)])
 
-class TestInstallIncrementallly(MonitoringTestBase, unittest.TestCase):
+class TestInstallIncrementally(MonitoringTestBase, unittest.TestCase):
 
     def check_events(self, func, must_include, tool=TEST_TOOL, recorders=(ExceptionRecorder,)):
         try:
@@ -1197,19 +1197,19 @@ class TestInstallIncrementallly(MonitoringTestBase, unittest.TestCase):
 
     MUST_INCLUDE_LI = [
             ('instruction', 'func1', 2),
-            ('line', 'func1', 1),
+            ('line', 'func1', 2),
             ('instruction', 'func1', 4),
             ('instruction', 'func1', 6)]
 
     def test_line_then_instruction(self):
         recorders = [ LineRecorder, InstructionRecorder ]
         self.check_events(self.func1,
-                          recorders = recorders, must_include = self.EXPECTED_LI)
+                          recorders = recorders, must_include = self.MUST_INCLUDE_LI)
 
     def test_instruction_then_line(self):
-        recorders = [ InstructionRecorder, LineRecorderLowNoise ]
+        recorders = [ InstructionRecorder, LineRecorder ]
         self.check_events(self.func1,
-                          recorders = recorders, must_include = self.EXPECTED_LI)
+                          recorders = recorders, must_include = self.MUST_INCLUDE_LI)
 
     @staticmethod
     def func2():
@@ -1224,12 +1224,12 @@ class TestInstallIncrementallly(MonitoringTestBase, unittest.TestCase):
 
 
 
-    def test_line_then_instruction(self):
+    def test_call_then_instruction(self):
         recorders = [ CallRecorder, InstructionRecorder ]
         self.check_events(self.func2,
                           recorders = recorders, must_include = self.MUST_INCLUDE_CI)
 
-    def test_instruction_then_line(self):
+    def test_instruction_then_call(self):
         recorders = [ InstructionRecorder, CallRecorder ]
         self.check_events(self.func2,
                           recorders = recorders, must_include = self.MUST_INCLUDE_CI)
@@ -1743,3 +1743,21 @@ class TestRegressions(MonitoringTestBase, unittest.TestCase):
         sys.monitoring.register_callback(0, E.INSTRUCTION, lambda *args: 0)
         sys.monitoring.set_events(0, E.LINE | E.INSTRUCTION)
         sys.monitoring.set_events(0, 0)
+
+    def test_call_function_ex(self):
+        def f(a=1, b=2):
+            return a + b
+        args = (1, 2)
+        empty_args = []
+
+        call_data = []
+        sys.monitoring.use_tool_id(0, "test")
+        self.addCleanup(sys.monitoring.free_tool_id, 0)
+        sys.monitoring.set_events(0, 0)
+        sys.monitoring.register_callback(0, E.CALL, lambda code, offset, callable, arg0: call_data.append((callable, arg0)))
+        sys.monitoring.set_events(0, E.CALL)
+        f(*args)
+        f(*empty_args)
+        sys.monitoring.set_events(0, 0)
+        self.assertEqual(call_data[0], (f, 1))
+        self.assertEqual(call_data[1], (f, sys.monitoring.MISSING))

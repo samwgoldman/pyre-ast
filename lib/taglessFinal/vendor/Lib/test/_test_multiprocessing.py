@@ -78,10 +78,15 @@ except ImportError:
     msvcrt = None
 
 
-if support.check_sanitizer(address=True):
-    # bpo-45200: Skip multiprocessing tests if Python is built with ASAN to
+if support.HAVE_ASAN_FORK_BUG:
+    # gh-89363: Skip multiprocessing tests if Python is built with ASAN to
     # work around a libasan race condition: dead lock in pthread_create().
-    raise unittest.SkipTest("libasan has a pthread_create() dead lock")
+    raise unittest.SkipTest("libasan has a pthread_create() dead lock related to thread+fork")
+
+
+# gh-110666: Tolerate a difference of 100 ms when comparing timings
+# (clock resolution)
+CLOCK_RES = 0.100
 
 
 def latin(s):
@@ -557,13 +562,14 @@ class _TestProcess(BaseTestCase):
 
     def test_terminate(self):
         exitcode = self._kill_process(multiprocessing.Process.terminate)
-        if os.name != 'nt':
-            self.assertEqual(exitcode, -signal.SIGTERM)
+        self.assertEqual(exitcode, -signal.SIGTERM)
 
     def test_kill(self):
         exitcode = self._kill_process(multiprocessing.Process.kill)
         if os.name != 'nt':
             self.assertEqual(exitcode, -signal.SIGKILL)
+        else:
+            self.assertEqual(exitcode, -signal.SIGTERM)
 
     def test_cpu_count(self):
         try:
@@ -1650,12 +1656,11 @@ class _TestCondition(BaseTestCase):
     def _test_waitfor_timeout_f(cls, cond, state, success, sem):
         sem.release()
         with cond:
-            expected = 0.1
+            expected = 0.100
             dt = time.monotonic()
             result = cond.wait_for(lambda : state.value==4, timeout=expected)
             dt = time.monotonic() - dt
-            # borrow logic in assertTimeout() from test/lock_tests.py
-            if not result and expected * 0.6 < dt < expected * 10.0:
+            if not result and (expected - CLOCK_RES) <= dt:
                 success.value = True
 
     @unittest.skipUnless(HAS_SHAREDCTYPES, 'needs sharedctypes')
@@ -1674,7 +1679,7 @@ class _TestCondition(BaseTestCase):
 
         # Only increment 3 times, so state == 4 is never reached.
         for i in range(3):
-            time.sleep(0.01)
+            time.sleep(0.010)
             with cond:
                 state.value += 1
                 cond.notify()
@@ -2433,8 +2438,11 @@ class _TestContainers(BaseTestCase):
 #
 #
 
-def sqr(x, wait=0.0):
-    time.sleep(wait)
+def sqr(x, wait=0.0, event=None):
+    if event is None:
+        time.sleep(wait)
+    else:
+        event.wait(wait)
     return x*x
 
 def mul(x, y):
@@ -2573,10 +2581,18 @@ class _TestPool(BaseTestCase):
         self.assertTimingAlmostEqual(get.elapsed, TIMEOUT1)
 
     def test_async_timeout(self):
-        res = self.pool.apply_async(sqr, (6, TIMEOUT2 + 1.0))
-        get = TimingWrapper(res.get)
-        self.assertRaises(multiprocessing.TimeoutError, get, timeout=TIMEOUT2)
-        self.assertTimingAlmostEqual(get.elapsed, TIMEOUT2)
+        p = self.Pool(3)
+        try:
+            event = threading.Event() if self.TYPE == 'threads' else None
+            res = p.apply_async(sqr, (6, TIMEOUT2 + support.SHORT_TIMEOUT, event))
+            get = TimingWrapper(res.get)
+            self.assertRaises(multiprocessing.TimeoutError, get, timeout=TIMEOUT2)
+            self.assertTimingAlmostEqual(get.elapsed, TIMEOUT2)
+        finally:
+            if event is not None:
+                event.set()
+            p.terminate()
+            p.join()
 
     def test_imap(self):
         it = self.pool.imap(sqr, list(range(10)))
@@ -2677,14 +2693,21 @@ class _TestPool(BaseTestCase):
                 p.join()
 
     def test_terminate(self):
-        result = self.pool.map_async(
-            time.sleep, [0.1 for i in range(10000)], chunksize=1
-            )
-        self.pool.terminate()
-        join = TimingWrapper(self.pool.join)
-        join()
-        # Sanity check the pool didn't wait for all tasks to finish
-        self.assertLess(join.elapsed, 2.0)
+        # Simulate slow tasks which take "forever" to complete
+        sleep_time = support.LONG_TIMEOUT
+
+        if self.TYPE == 'threads':
+            # Thread pool workers can't be forced to quit, so if the first
+            # task starts early enough, we will end up waiting for it.
+            # Sleep for a shorter time, so the test doesn't block.
+            sleep_time = 1
+
+        p = self.Pool(3)
+        args = [sleep_time for i in range(10_000)]
+        result = p.map_async(time.sleep, args, chunksize=1)
+        time.sleep(0.2)  # give some tasks a chance to start
+        p.terminate()
+        p.join()
 
     def test_empty_iterable(self):
         # See Issue 12157
@@ -3443,6 +3466,30 @@ class _TestListener(BaseTestCase):
         if self.TYPE == 'processes':
             self.assertRaises(OSError, l.accept)
 
+    def test_empty_authkey(self):
+        # bpo-43952: allow empty bytes as authkey
+        def handler(*args):
+            raise RuntimeError('Connection took too long...')
+
+        def run(addr, authkey):
+            client = self.connection.Client(addr, authkey=authkey)
+            client.send(1729)
+
+        key = b''
+
+        with self.connection.Listener(authkey=key) as listener:
+            thread = threading.Thread(target=run, args=(listener.address, key))
+            thread.start()
+            try:
+                with listener.accept() as d:
+                    self.assertEqual(d.recv(), 1729)
+            finally:
+                thread.join()
+
+        if self.TYPE == 'processes':
+            with self.assertRaises(OSError):
+                listener.accept()
+
     @unittest.skipUnless(util.abstract_sockets_supported,
                          "test needs abstract socket support")
     def test_abstract_socket(self):
@@ -3910,6 +3957,21 @@ class _TestSharedMemory(BaseTestCase):
         # test_multiprocessing_spawn, etc) in parallel.
         return prefix + str(os.getpid())
 
+    def test_shared_memory_name_with_embedded_null(self):
+        name_tsmb = self._new_shm_name('test01_null')
+        sms = shared_memory.SharedMemory(name_tsmb, create=True, size=512)
+        self.addCleanup(sms.unlink)
+        with self.assertRaises(ValueError):
+            shared_memory.SharedMemory(name_tsmb + '\0a', create=False, size=512)
+        if shared_memory._USE_POSIX:
+            orig_name = sms._name
+            try:
+                sms._name = orig_name + '\0a'
+                with self.assertRaises(ValueError):
+                    sms.unlink()
+            finally:
+                sms._name = orig_name
+
     def test_shared_memory_basics(self):
         name_tsmb = self._new_shm_name('test01_tsmb')
         sms = shared_memory.SharedMemory(name_tsmb, create=True, size=512)
@@ -4044,7 +4106,7 @@ class _TestSharedMemory(BaseTestCase):
             self.addCleanup(shm2.unlink)
             self.assertEqual(shm2._name, names[1])
 
-    def test_invalid_shared_memory_cration(self):
+    def test_invalid_shared_memory_creation(self):
         # Test creating a shared memory segment with negative size
         with self.assertRaises(ValueError):
             sms_invalid = shared_memory.SharedMemory(create=True, size=-1)
@@ -4616,6 +4678,29 @@ class _TestLogging(BaseTestCase):
         root_logger.setLevel(root_level)
         logger.setLevel(level=LOG_LEVEL)
 
+    def test_filename(self):
+        logger = multiprocessing.get_logger()
+        original_level = logger.level
+        try:
+            logger.setLevel(util.DEBUG)
+            stream = io.StringIO()
+            handler = logging.StreamHandler(stream)
+            logging_format = '[%(levelname)s] [%(filename)s] %(message)s'
+            handler.setFormatter(logging.Formatter(logging_format))
+            logger.addHandler(handler)
+            logger.info('1')
+            util.info('2')
+            logger.debug('3')
+            filename = os.path.basename(__file__)
+            log_record = stream.getvalue()
+            self.assertIn(f'[INFO] [{filename}] 1', log_record)
+            self.assertIn(f'[INFO] [{filename}] 2', log_record)
+            self.assertIn(f'[DEBUG] [{filename}] 3', log_record)
+        finally:
+            logger.setLevel(original_level)
+            logger.removeHandler(handler)
+            handler.close()
+
 
 # class _TestLoggingProcessName(BaseTestCase):
 #
@@ -4869,7 +4954,7 @@ class TestWait(unittest.TestCase):
     def _child_test_wait(cls, w, slow):
         for i in range(10):
             if slow:
-                time.sleep(random.random()*0.1)
+                time.sleep(random.random() * 0.100)
             w.send((i, os.getpid()))
         w.close()
 
@@ -4909,7 +4994,7 @@ class TestWait(unittest.TestCase):
         s.connect(address)
         for i in range(10):
             if slow:
-                time.sleep(random.random()*0.1)
+                time.sleep(random.random() * 0.100)
             s.sendall(('%s\n' % i).encode('ascii'))
         s.close()
 
@@ -4958,25 +5043,19 @@ class TestWait(unittest.TestCase):
     def test_wait_timeout(self):
         from multiprocessing.connection import wait
 
-        expected = 5
+        timeout = 5.0  # seconds
         a, b = multiprocessing.Pipe()
 
         start = time.monotonic()
-        res = wait([a, b], expected)
+        res = wait([a, b], timeout)
         delta = time.monotonic() - start
 
         self.assertEqual(res, [])
-        self.assertLess(delta, expected * 2)
-        self.assertGreater(delta, expected * 0.5)
+        self.assertGreater(delta, timeout - CLOCK_RES)
 
         b.send(None)
-
-        start = time.monotonic()
         res = wait([a, b], 20)
-        delta = time.monotonic() - start
-
         self.assertEqual(res, [a])
-        self.assertLess(delta, 0.4)
 
     @classmethod
     def signal_and_sleep(cls, sem, period):
@@ -5434,7 +5513,9 @@ class TestStartMethod(unittest.TestCase):
         while not queue.empty():
             results.append(queue.get())
 
-        self.assertEqual(results, [2, 1])
+        # gh-109706: queue.put(1) can write into the queue before queue.put(2),
+        # there is no synchronization in the test.
+        self.assertSetEqual(set(results), set([2, 1]))
 
 
 @unittest.skipIf(sys.platform == "win32",

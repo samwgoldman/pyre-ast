@@ -7,6 +7,7 @@ import numbers
 import operator
 import fractions
 import functools
+import os
 import sys
 import typing
 import unittest
@@ -15,6 +16,9 @@ import pickle
 from pickle import dumps, loads
 F = fractions.Fraction
 
+#locate file with float format test values
+test_dir = os.path.dirname(__file__) or os.curdir
+format_testfile = os.path.join(test_dir, 'formatfloat_testcases.txt')
 
 class DummyFloat(object):
     """Dummy float class for testing comparisons with Fractions"""
@@ -257,6 +261,30 @@ class FractionTest(unittest.TestCase):
         self.assertRaisesMessage(
             ValueError, "Invalid literal for Fraction: '1.1e+1__1'",
             F, "1.1e+1__1")
+        self.assertRaisesMessage(
+            ValueError, "Invalid literal for Fraction: '123.dd'",
+            F, "123.dd")
+        self.assertRaisesMessage(
+            ValueError, "Invalid literal for Fraction: '123.5_dd'",
+            F, "123.5_dd")
+        self.assertRaisesMessage(
+            ValueError, "Invalid literal for Fraction: 'dd.5'",
+            F, "dd.5")
+        self.assertRaisesMessage(
+            ValueError, "Invalid literal for Fraction: '7_dd'",
+            F, "7_dd")
+        self.assertRaisesMessage(
+            ValueError, "Invalid literal for Fraction: '1/dd'",
+            F, "1/dd")
+        self.assertRaisesMessage(
+            ValueError, "Invalid literal for Fraction: '1/123_dd'",
+            F, "1/123_dd")
+        self.assertRaisesMessage(
+            ValueError, "Invalid literal for Fraction: '789edd'",
+            F, "789edd")
+        self.assertRaisesMessage(
+            ValueError, "Invalid literal for Fraction: '789e2_dd'",
+            F, "789e2_dd")
         # Test catastrophic backtracking.
         val = "9"*50 + "_"
         self.assertRaisesMessage(
@@ -1219,6 +1247,30 @@ class FractionTest(unittest.TestCase):
             with self.subTest(spec=spec):
                 with self.assertRaises(ValueError):
                     format(fraction, spec)
+
+    @requires_IEEE_754
+    def test_float_format_testfile(self):
+        with open(format_testfile, encoding="utf-8") as testfile:
+            for line in testfile:
+                if line.startswith('--'):
+                    continue
+                line = line.strip()
+                if not line:
+                    continue
+
+                lhs, rhs = map(str.strip, line.split('->'))
+                fmt, arg = lhs.split()
+                if fmt == '%r':
+                    continue
+                fmt2 = fmt[1:]
+                with self.subTest(fmt=fmt, arg=arg):
+                    f = F(float(arg))
+                    self.assertEqual(format(f, fmt2), rhs)
+                    if f:  # skip negative zero
+                        self.assertEqual(format(-f, fmt2), '-' + rhs)
+                    f = F(arg)
+                    self.assertEqual(float(format(f, fmt2)), float(rhs))
+                    self.assertEqual(float(format(-f, fmt2)), float('-' + rhs))
 
 
 if __name__ == '__main__':

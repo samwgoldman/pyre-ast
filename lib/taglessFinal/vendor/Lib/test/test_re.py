@@ -1,7 +1,7 @@
 from test.support import (gc_collect, bigmemtest, _2G,
                           cpython_only, captured_stdout,
                           check_disallow_instantiation, is_emscripten, is_wasi,
-                          SHORT_TIMEOUT)
+                          SHORT_TIMEOUT, requires_resource)
 import locale
 import re
 import string
@@ -1799,6 +1799,29 @@ class ReTests(unittest.TestCase):
         self.assertRaises(OverflowError, re.compile, r".{%d,}?" % 2**128)
         self.assertRaises(OverflowError, re.compile, r".{%d,%d}" % (2**129, 2**128))
 
+    def test_look_behind_overflow(self):
+        string = "x" * 2_500_000
+        p1 = r"(?<=((.{%d}){%d}){%d})"
+        p2 = r"(?<!((.{%d}){%d}){%d})"
+        # Test that the templates are valid and look-behind with width 2**21
+        # (larger than sys.maxunicode) are supported.
+        self.assertEqual(re.search(p1 % (2**7, 2**7, 2**7), string).span(),
+                         (2**21, 2**21))
+        self.assertEqual(re.search(p2 % (2**7, 2**7, 2**7), string).span(),
+                         (0, 0))
+        # Test that 2**22 is accepted as a repetition number and look-behind
+        # width.
+        re.compile(p1 % (2**22, 1, 1))
+        re.compile(p1 % (1, 2**22, 1))
+        re.compile(p1 % (1, 1, 2**22))
+        re.compile(p2 % (2**22, 1, 1))
+        re.compile(p2 % (1, 2**22, 1))
+        re.compile(p2 % (1, 1, 2**22))
+        # But 2**66 is too large for look-behind width.
+        errmsg = "looks too much behind"
+        self.assertRaisesRegex(re.error, errmsg, re.compile, p1 % (2**22, 2**22, 2**22))
+        self.assertRaisesRegex(re.error, errmsg, re.compile, p2 % (2**22, 2**22, 2**22))
+
     def test_backref_group_name_in_exception(self):
         # Issue 17341: Poor error message when compiling invalid regex
         self.checkPatternError('(?P=<foo>)',
@@ -2194,6 +2217,9 @@ class ReTests(unittest.TestCase):
         with self.assertRaisesRegex(TypeError, "got 'type'"):
             re.search("x*", type)
 
+    # gh-117594: The test is not slow by itself, but it relies on
+    # the absolute computation time and can fail on very slow computers.
+    @requires_resource('cpu')
     def test_search_anchor_at_beginning(self):
         s = 'x'*10**7
         start = time.perf_counter()
@@ -2694,6 +2720,9 @@ class ImplementationTest(unittest.TestCase):
             _sre.compile("abc", 0, [long_overflow], 0, {}, ())
         with self.assertRaises(TypeError):
             _sre.compile({}, 0, [], 0, [], [])
+        # gh-110590: `TypeError` was overwritten with `OverflowError`:
+        with self.assertRaises(TypeError):
+            _sre.compile('', 0, ['abc'], 0, {}, ())
 
     @cpython_only
     def test_repeat_minmax_overflow_maxrepeat(self):
