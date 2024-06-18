@@ -1,4 +1,4 @@
-## unreleased
+## 0.1.10 (2024-6-17)
 
 - Bump the bundled CPython version to 3.12.3
 
