@@ -9,7 +9,7 @@
 (rule
  (deps
   (source_tree vendor))
- (targets libpython.a pyconfig.h)
+ (targets libpython.a pyconfig.h python-config.sh)
  (action
   (no-infer
    (progn
@@ -22,7 +22,22 @@
        (run ./configure)
        (run make libpython3.12.a))))
     (copy vendor/libpython3.12.a libpython.a)
-    (copy vendor/pyconfig.h pyconfig.h)))))
+    (copy vendor/pyconfig.h pyconfig.h)
+    (copy vendor/Misc/python-config.sh python-config.sh)))))
+
+(rule
+ (deps
+  (file python-config.sh))
+ (targets python-config-fixed.sh)
+ (action
+  (run ./misc/fix_python_config.exe python-config.sh)))
+
+(rule
+ (deps
+  (file python-config-fixed.sh))
+ (targets ldflags.sexp)
+ (action
+  (run ./misc/discover_ldflag.exe python-config-fixed.sh)))
 
 (library
  (name taglessFinal)
@@ -33,5 +48,6 @@
   (language c)
   (names binding)
   (flags :standard -Ivendor/Include -I.))
- (c_library_flags -lutil)
+ (c_library_flags
+  (:include ldflags.sexp))
  (foreign_archives python))
